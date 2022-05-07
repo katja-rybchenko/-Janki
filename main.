@@ -1,0 +1,736 @@
+import json
+from flask import Flask, request
+from flask_ngrok import run_with_ngrok
+import sqlite3
+from random import choices, sample
+
+con = sqlite3.connect('cards.db', check_same_thread=False)
+cur = con.cursor()
+
+app = Flask(__name__)
+run_with_ngrok(app)
+
+Alisa_cards_create = {}
+
+Alisa_cards_repeat = {}
+
+Alisa_cards_delete = {}
+
+
+def add_1(user_id, question):
+    Alisa_cards_create[user_id] = [question]
+    return Alisa_cards_create
+
+
+def add_2(user_id, answer):
+    Alisa_cards_create[user_id].append(answer)
+
+
+def add_3(user_id, description):
+    Alisa_cards_create[user_id].append(description)
+
+
+def add_4(user_id, groups):
+    Alisa_cards_create[user_id].append(groups)
+
+
+def delete_Alise(user_id):
+    del Alisa_cards_create[user_id]
+
+
+def add_delete_1(user_id, groups):
+    Alisa_cards_delete[user_id] = [groups]
+    return Alisa_cards_create
+
+
+def add_delete_2(user_id, description):
+    Alisa_cards_delete[user_id].append(description)
+
+
+def delete_Alise_3(user_id):
+    del Alisa_cards_delete[user_id]
+
+
+def delete_cards(user_id):
+    groups = Alisa_cards_delete[user_id][0]
+    description = Alisa_cards_delete[user_id][1]
+    cur.execute('DELETE from alisacards WHERE description = ? and groups = ? and id = ?',
+                (description, groups, user_id))
+    con.commit()
+
+
+def insert_cards(user_id):
+    question = Alisa_cards_create[user_id][0]
+    answer = Alisa_cards_create[user_id][1]
+    description = Alisa_cards_create[user_id][2]
+    groups = Alisa_cards_create[user_id][3]
+    cur.execute('INSERT INTO alisacards(id, question, answer, description, groups) VALUES(?, ?, ?, ?, ?)',
+                (user_id, question, answer, description, groups))
+    con.commit()
+
+
+def select_cards(user_id, group):
+    Alisa_cards_repeat[user_id] = []
+    result = cur.execute("""SELECT question, answer FROM alisacards
+    WHERE id = ? and groups = ?""", (user_id, group)).fetchall()
+    Alisa_cards_repeat[user_id].append(sample(result, len(result)))
+
+
+def create_ans_qw(user_id):
+    if len(Alisa_cards_repeat[user_id]) != 0:
+        Alisa_cards_repeat[user_id].append(Alisa_cards_repeat[user_id][0][0][0])
+        Alisa_cards_repeat[user_id].append(Alisa_cards_repeat[user_id][0][0][1])
+        del Alisa_cards_repeat[user_id][0][0]
+
+
+def delete_ans_qw(user_id):
+    del Alisa_cards_repeat[user_id][-1]
+    del Alisa_cards_repeat[user_id][-1]
+
+
+def Alisa_create_delete_repeate(user_id, req, res):
+    res['response']['text'] = 'Что хотите сделать ? Я могу создать, удалить, ' \
+                              'повторить карточки или рассказать побольше о навыке.'
+    if 'созда' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Создаю карточку. Скажите вопрос карточки'
+        sessions_state[user_id] = {
+            'state': 2
+        }
+        return
+    elif 'удали' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Вы хотите удалить группу или карточку?'
+        sessions_state[user_id] = {
+            'state': 12
+        }
+        return
+    elif 'повтори' in req['request']['original_utterance'].lower():
+        res['response']['buttons'] = [
+            {
+                'title': 'Свои карточки',
+                'hide': False
+            },
+            {
+                'title': 'Карточки навыка',
+                'hide': False
+            }
+        ]
+        res['response']['text'] = 'Вы хотите повторить свои карточки или карточки навыка?'
+        sessions_state[user_id] = {
+            'state': 42
+        }
+        return
+    elif 'выйти' in req['request']['original_utterance'].lower():
+        game_over(user_id, req, res)
+    elif 'помоги' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Я могу создать карточки для запоминания. ' \
+                                  'Они состоят из имени группы, вопроса и ответа. ' \
+                                  'Также я могу озвучить их всех и по группам. ' \
+                                  'А если потребуется, удалить их. ' \
+                                  'Для списка команд скажите: "Расскажи побольше"'
+        return
+    elif 'расскажи побольше' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Вот полный список комманд: создай карточку, удали карточку , ' \
+                                  'повтори карточки, стоп - о какой команде вам интересно узнать ?' \
+                                  'Если вопросов у вас не останется скажите "Завершить"' \
+                                  'и я вас переправлю в главное меню.'
+        res['response']['buttons'] = [
+            {
+                'title': 'Создай карточку',
+                'hide': False
+            },
+            {
+                'title': 'Удали карточку',
+                'hide': False
+            },
+            {
+                'title': 'Повтори карточки',
+                'hide': False
+            },
+            {
+                'title': 'Стоп',
+                'hide': False
+            },
+            {
+                'title': 'Завершить',
+                'hide': False
+            },
+        ]
+        sessions_state[user_id] = {
+            'state': 32
+        }
+        return
+    else:
+        res['response']['text'] = 'Повторите пожалуйста'
+        return
+
+
+def Alisa_about_help(user_id, req, res):
+    if 'созда' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Чтобы создать карточку скажите вопрос , ' \
+                                  'далее дайте на него ответ, после создания карточки ' \
+                                  'выберите группу куда я размещу вашу карточку.'
+        return
+    elif 'повтор' in req['request']['original_utterance'].lower():
+        res['response']['text'] = ' Здесь хранятся ваши готовые карточки с вопросами и ответами. ' \
+                                  'Выберите группу карточек которую хотите повторить, и я вам её озвучу . ' \
+                                  'Тренируйтесь часто ,чтобы запомнить нужную вам информацию.'
+        return
+    elif 'удали' in req['request']['original_utterance'].lower():
+        res['response']['text'] = ' чтобы удалить нужную карточку , сначала выберите нужную вам группу,' \
+                                  ' далее выберите номер карточки , и я удалю её. ' \
+                                  'Или вы можете удалить просто группу '
+        return
+    elif 'групп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Группа - это небольшая папка, ' \
+                                  'в котором находятся некоторые из загаданных ' \
+                                  'вами карточек'
+        return
+    elif 'карточк' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Карточки нужны для запоминания нужных ' \
+                                  'вам тем. Не ленитесь и тренируйтесь часто.' \
+                                  'Карточка - это лист, на котором написан ' \
+                                  'вопрос и ответ (придуманный вами ранее)'
+        return
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Стоп  - специальная команда которая позволяет' \
+                                  ' прервать действие и вернуться в главное меню'
+        return
+    elif 'завершить' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Чем могу служить вам?'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+        return
+    else:
+        res['response']['text'] = 'Не поняла вас'
+        return
+
+
+def Alisa_create_step2_3(user_id, req, res):
+    if 'выйти' in req['request']['original_utterance'].lower():
+        game_over(user_id, req, res)
+    elif 'помо' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'В этой ветке вам нужно будет назвать ' \
+                                  'вопрос и ответ на этот вопрос, который будет в данной карточке.'
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'создание карточки отменено. Создать карточку заново ?'
+        sessions_state[user_id] = {
+            'state': 222
+        }
+        return
+    elif req['request']['original_utterance']:
+        add_1(user_id, req['request']['original_utterance'])
+        res['response']['text'] = 'Отлично! Теперь скажите ответ на карточку'
+        sessions_state[user_id] = {
+            'state': 3
+        }
+
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_create_step3_4(user_id, req, res):
+    if 'выйти' in req['request']['original_utterance'].lower():
+        game_over(user_id, req, res)
+    elif 'помоги' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'В этой ветке вам нужно ' \
+                                  'ввести ответ на вопрос, который вы задали в карточке'
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'создание карточки отменено. Создать карточку заново ?'
+        sessions_state[user_id] = {
+            'state': 222
+        }
+        return
+    elif req['request']['original_utterance']:
+        add_2(user_id, req['request']['original_utterance'].lower())
+        res['response']['text'] = 'Теперь дайте название карточке'
+        sessions_state[user_id] = {
+            'state': 4
+        }
+        return
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_create_step4_5(user_id, req, res):
+    if 'выйти' in req['request']['original_utterance'].lower():
+        game_over(user_id, req, res)
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'создание карточки отменено. Создать карточку заново ?'
+        sessions_state[user_id] = {
+            'state': 222
+        }
+        return
+    elif req['request']['original_utterance']:
+        add_3(user_id, req['request']['original_utterance'].lower())
+        res['response']['text'] = 'Назовите имя группы в которую добавить карточку'
+        sessions_state[user_id] = {
+            'state': 5
+        }
+        return
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_create_step5_6(user_id, req, res):
+    if 'выйти' in req['request']['original_utterance'].lower():
+        game_over(user_id, req, res)
+    elif 'помоги' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'В этой ветке вам нужно ' \
+                                  'соотнести созданную вами карточку с группой, в которой она будет в находится'
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'создание карточки отменено. Создать карточку заново ?'
+        sessions_state[user_id] = {
+            'state': 222
+        }
+        return
+    elif req['request']['original_utterance']:
+        add_4(user_id, req['request']['original_utterance'].lower())
+        res['response']['text'] = 'Записала. Оставить карточку или удалить?'
+        sessions_state[user_id] = {
+            'state': 6
+        }
+        return
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_create_step6_7(user_id, req, res):
+    if 'выйти' in req['request']['original_utterance'].lower():
+        game_over(user_id, req, res)
+    elif 'оставить' in req['request']['original_utterance'].lower():
+        insert_cards(user_id)
+        res['response']['text'] = 'Карточка создана. Возвращаю в главное меню'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+        return
+    elif 'удалить' in req['request']['original_utterance'].lower():
+        delete_Alise(user_id)
+        res['response']['text'] = 'Карточка удалена. Сделать новую или вернуться?'
+        sessions_state[user_id] = {
+            'state': 7
+        }
+        return
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'создание карточки отменено. Создать карточку заново ?'
+        sessions_state[user_id] = {
+            'state': 222
+        }
+        return
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_create_step7_8(user_id, req, res):
+    if 'новую' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Создаю карточку. Скажите вопрос карточки'
+        sessions_state[user_id] = {
+            'state': 2
+        }
+        return
+    elif 'вернуться' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Чем могу помочь вам ?'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+        return
+    elif 'выйти' in req['request']['original_utterance'].lower():
+        game_over(user_id, req, res)
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'создание карточки отменено. Создать карточку заново ?'
+        sessions_state[user_id] = {
+            'state': 222
+        }
+        return
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_create_stор(user_id, req, res):
+    if 'да' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Создаю карточку. Скажите вопрос карточки'
+        sessions_state[user_id] = {
+            'state': 2
+        }
+        return
+    elif 'нет' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Чем могу помочь вам ?'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+        return
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_delete_step2_3(user_id, req, res):
+    if 'выйти' in req['request']['original_utterance'].lower():
+        game_over(user_id, req, res)
+    elif 'помоги' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'В этой ветке вам нужно выбрать группу карточек, ' \
+                                  'из которой вы хотите удалить карточку. ' \
+                                  'Хотите удалить группу или карточку?'
+    elif 'группу' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Назовите имя группы карточек'
+        sessions_state[user_id] = {
+            'state': 23
+        }
+    elif 'карточку' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Назовите имя группы карточек'
+        sessions_state[user_id] = {
+            'state': 13
+        }
+    elif 'помоги' in req['request']['original_utterance'].lower():
+        res['response']['text'] = ' В этой ветке вам нужно выбрать карточку или группу, ' \
+                                  'которую вы хотите удалить'
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Удаление отменено.Попробовать снова ?'
+        sessions_state[user_id] = {
+            'state': 111
+        }
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_delete_step3_4(user_id, req, res):
+    if 'выйти' in req['request']['original_utterance'].lower():
+        game_over(user_id, req, res)
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Удаление отменено.Попробовать снова ?'
+        sessions_state[user_id] = {
+            'state': 111
+        }
+    elif req['request']['original_utterance']:
+        add_delete_1(user_id, req['request']['original_utterance'].lower())
+        result = cur.execute("""SELECT * FROM alisacards WHERE groups = ?""",
+                             (req['request']['original_utterance'].lower(),)).fetchall()
+        line_stok = 'Выберите карточку для удаления. Ваши карточки:\n'
+        for elem in result:
+            line_stok += f'{elem[3]}\n'
+        res['response']['text'] = line_stok
+        res['response']['buttons'] = mim(req['request']['original_utterance'].lower())
+        sessions_state[user_id] = {
+            'state': 14
+        }
+        return
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_delete_step4_5(user_id, req, res):
+    if 'выйти' in req['request']['original_utterance'].lower():
+        game_over(user_id, req, res)
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Удаление отменено.Попробовать снова ?'
+        sessions_state[user_id] = {
+            'state': 111
+        }
+    elif req['request']['original_utterance']:
+        add_delete_2(user_id, req['request']['original_utterance'].lower())
+        delete_cards(user_id)
+        res['response']['text'] = 'Удалено. Чем ещё могу помочь вам?'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+        return
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_delete_step3_4_group(user_id, req, res):
+    if 'выйти' in str(req['request']['original_utterance'].lower()):
+        game_over(user_id, req, res)
+    elif 'помоги' in str(req['request']['original_utterance'].lower()):
+        res['response']['text'] = 'В этой ветке вам нужно выбрать группу карточек, которую вы хотите удалить'
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Удаление отменено.Попробовать снова ?'
+        sessions_state[user_id] = {
+            'state': 111
+        }
+    elif req['request']['original_utterance']:
+        info = cur.execute('SELECT * FROM alisacards WHERE groups = ? and id = ?',
+                           (req['request']['original_utterance'].lower(), user_id))
+        if info.fetchone() is None:
+            res['response']['text'] = f'Не могу найти такую группу , попробуйте ещё'
+        else:
+            cur.execute('DELETE from alisacards WHERE groups = ? and id = ?',
+                        (req['request']['original_utterance'].lower(), user_id))
+            con.commit()
+            res['response']['text'] = 'Удалено. Желаете удалить что-то ещё ?'
+            sessions_state[user_id] = {
+                'state': 24
+            }
+        return
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_delete_step4_5_group(user_id, req, res):
+    if 'выйти' in req['request']['original_utterance'].lower():
+        game_over(user_id, req, res)
+    elif 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Удаление отменено.Попробовать снова ?'
+        sessions_state[user_id] = {
+            'state': 111
+        }
+    elif 'да' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Вы хотите удалить группу или карточку?'
+        sessions_state[user_id] = {
+            'state': 12
+        }
+    elif 'нет' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Чем могу ещё помочь?'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_delete_stор(user_id, req, res):
+    if 'да' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Вы хотите удалить группу или карточку?'
+        sessions_state[user_id] = {
+            'state': 12
+        }
+    elif 'нет' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Чем ещё могу тебе помочь?'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_repeat_step2_3(user_id, req, res):
+    if 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Вы закончили работу с вопросами. Чем могу ещё вам помочь?'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+    elif 'свои' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Выберите группу'
+        sessions_state[user_id] = {
+            'state': 43
+        }
+    elif 'навыка' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Выберите группу'
+        res['response']['buttons'] = [
+            {
+                'title': 'Интересные факты',
+                'hide': False
+            },
+        ]
+        sessions_state[user_id] = {
+            'state': 53
+        }
+    else:
+        res['response']['text'] = 'Не расслышала вас'
+        return
+
+
+def Alisa_repeat_step_cards_3_4(user_id, req, res):  # pol
+    info = cur.execute('SELECT * FROM alisacards WHERE groups = ?', (req['request']['original_utterance'].lower(),))
+    if info.fetchone() is None:
+        res['response']['text'] = 'Не могу найти такую группу, попробуйте ещё'
+    elif 'интересные факты' in req['request']['original_utterance'].lower():
+        select_cards(111, 'интересные факты')
+        create_ans_qw(111)
+        res['response']['text'] = f'{Alisa_cards_repeat[111][1]}'
+        sessions_state[user_id] = {
+            'state': 54
+        }
+    else:
+        res['response']['text'] = f'Не расслышала вас'
+
+
+def Alisa_repeat_step4_5(user_id, req, res):
+    if 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Вы закончили отвечать на вопросы. Чем могу помочь?.'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+    elif len(Alisa_cards_repeat[111][0]) != 0:
+        if str(Alisa_cards_repeat[111][2]) in str(req['request']['original_utterance'].lower()):
+            delete_ans_qw(111)
+            create_ans_qw(111)
+            res['response']['text'] = f'Вы ответили верно. Следующий вопрос {Alisa_cards_repeat[111][1]}'
+        else:
+            name_ver = Alisa_cards_repeat[111][2]
+            delete_ans_qw(111)
+            create_ans_qw(111)
+            res['response']['text'] = f'Вы ответили неверно.Правильный ответ :{name_ver}.' \
+                                      f' Следующий вопрос. {Alisa_cards_repeat[111][1]}'
+
+    else:
+        if str(Alisa_cards_repeat[111][2]) in str(req['request']['original_utterance'].lower()):
+            del Alisa_cards_repeat[111]
+            res['response']['text'] = f'Вы ответили верно. Группа карточек закончилась.' \
+                                      f' Чем ещё могу помочь?'
+        else:
+            name_ver = Alisa_cards_repeat[111][2]
+            del Alisa_cards_repeat[111]
+            res['response']['text'] = f'Вы ответили неверно.Правильный ответ :{name_ver}.' \
+                                      f'Группа карточек закончилась. Чем ещё могу помочь?'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+
+
+def Alisa_repeat_step_pol_3_4(user_id, req, res):
+    info = cur.execute('SELECT * FROM alisacards WHERE groups = ?', (req['request']['original_utterance'].lower(),))
+    if 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Вы закончили работу с вопросами. Чем могу ещё вам помочь?'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+    elif info.fetchone() is None:
+        res['response']['text'] = 'Не могу найти такую группу, попробуйте ещё'
+    elif 'интересные факты' in req['request']['original_utterance'].lower():
+        select_cards(111, 'интересные факты')
+        create_ans_qw(111)
+        res['response']['text'] = f'{Alisa_cards_repeat[111][1]}'
+        print(Alisa_cards_repeat)
+        sessions_state[user_id] = {
+            'state': 54
+        }
+    else:
+        select_cards(user_id, req['request']['original_utterance'].lower())
+        create_ans_qw(user_id)
+        res['response']['text'] = f'{Alisa_cards_repeat[user_id][1]}'
+        sessions_state[user_id] = {
+            'state': 44
+        }
+
+
+def Alisa_repeat_pol_4_5(user_id, req, res):
+    if 'стоп' in req['request']['original_utterance'].lower():
+        res['response']['text'] = 'Вы закончили отвечать на вопросы. возвращаю в главное меню.'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+    elif len(Alisa_cards_repeat[user_id][0]) != 0:
+        if str(Alisa_cards_repeat[user_id][2]) in str(req['request']['original_utterance'].lower()):
+            delete_ans_qw(user_id)
+            create_ans_qw(user_id)
+            res['response']['text'] = f'Вы ответили верно. Следующий вопрос {Alisa_cards_repeat[user_id][1]}'
+        else:
+            name_ver = Alisa_cards_repeat[user_id][2]
+            delete_ans_qw(user_id)
+            create_ans_qw(user_id)
+            res['response']['text'] = f'Вы ответили неверно.Правильный ответ :{name_ver}.' \
+                                      f' Следующий вопрос. {Alisa_cards_repeat[user_id][1]}'
+
+    else:
+        if str(Alisa_cards_repeat[user_id][2]) in str(req['request']['original_utterance'].lower()):
+            del Alisa_cards_repeat[user_id]
+            res['response']['text'] = f'Вы ответили верно. Группа карточек закончилась.' \
+                                      f' Чем ещё могу помочь?'
+        else:
+            name_ver = Alisa_cards_repeat[user_id][2]
+            del Alisa_cards_repeat[user_id]
+            res['response']['text'] = f'Вы ответили неверно.Правильный ответ :{name_ver}.' \
+                                      f'Группа карточек закончилась. Чем ещё могу помочь?'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+
+
+def game_over(user_id, req, res):
+    res['response']['text'] = 'Рада была помочь! Тренируйтесь часто, ' \
+                              'чтобы развить ваши способности!'
+    res['response']['end_session'] = True
+
+
+def mim(groups):
+    result = cur.execute("""SELECT * FROM alisacards WHERE groups = ?""",
+                         (groups,)).fetchall()
+    return [{'title': i[3], 'hide': True} for i in result]
+
+
+@app.route('/post', methods=['POST'])
+def main():
+    response = {
+        'session': request.json['session'],
+        'version': request.json['version'],
+        'response': {
+            'end_session': False
+        }
+    }
+
+    handle_dialog(request.json, response)
+    return json.dumps(response)
+
+
+def handle_dialog(req, res):
+    user_id = req['session']['user_id']
+    if req['session']['new']:
+        res['response']['buttons'] = [
+            {
+                'title': 'Удалить карточку или группу',
+                'hide': False
+            },
+            {
+                'title': 'Создать карточку',
+                'hide': False
+            },
+            {
+                'title': 'Повторить карточки',
+                'hide': False
+            },
+            {
+                'title': 'Расскажи побольше',
+                'hide': False
+            }]
+        res['response']['text'] = 'Что хотите сделать ? Я могу создать, удалить, ' \
+                                  'повторить карточки или рассказать побольше о программе.'
+        sessions_state[user_id] = {
+            'state': 1
+        }
+        return
+    states_repeat_create_delete[sessions_state[user_id]['state']](user_id, req, res)
+
+
+states_repeat_create_delete = {
+    1: Alisa_create_delete_repeate,
+    2: Alisa_create_step2_3,
+    3: Alisa_create_step3_4,
+    4: Alisa_create_step4_5,
+    5: Alisa_create_step5_6,
+    6: Alisa_create_step6_7,
+    7: Alisa_create_step7_8,
+    12: Alisa_delete_step2_3,
+    13: Alisa_delete_step3_4,
+    14: Alisa_delete_step4_5,
+    23: Alisa_delete_step3_4_group,
+    24: Alisa_delete_step4_5_group,
+    32: Alisa_about_help,
+    42: Alisa_repeat_step2_3,
+    43: Alisa_repeat_step_pol_3_4,
+    44: Alisa_repeat_pol_4_5,
+    53: Alisa_repeat_step_cards_3_4,
+    54: Alisa_repeat_step4_5,
+    100: game_over,
+    111: Alisa_delete_stор,
+    222: Alisa_create_stор,
+
+}
+
+sessions_state = {}
+
+if __name__ == '__main__':
+    app.run()
